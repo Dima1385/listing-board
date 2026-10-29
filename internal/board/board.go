@@ -5,12 +5,24 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"path/filepath"
 	"time"
 )
 
 var (
 	ErrNotFound  = errors.New("not found")
 	ErrDuplicate = errors.New("duplicate")
+	ErrConflict  = errors.New("conflict")
+)
+
+const (
+	StatusDraft   = "draft"
+	StatusRunning = "running"
+	StatusSuccess = "success"
+	StatusFailed  = "failed"
+
+	StepPending = "pending"
+	StepDone    = "done"
 )
 
 type User struct {
@@ -40,10 +52,14 @@ type Job struct {
 
 func NewChecklist() []Step {
 	return []Step{
-		{Label: "Reading the brochure", State: "pending"},
-		{Label: "Checking the address", State: "pending"},
-		{Label: "Publishing the sheet", State: "pending"},
+		{Label: "Reading the brochure", State: StepPending},
+		{Label: "Checking the address", State: StepPending},
+		{Label: "Publishing the sheet", State: StepPending},
 	}
+}
+
+func BrochurePath(dataDir, userID, jobID string) string {
+	return filepath.Join(dataDir, userID, jobID, "body")
 }
 
 func NewID() string {
@@ -72,5 +88,6 @@ type Store interface {
 	ListJobs(ctx context.Context, userID string) ([]Job, error)
 	CreateJob(ctx context.Context, job Job) error
 	Job(ctx context.Context, id string) (Job, error)
-	UpdateJob(ctx context.Context, job Job) error
+	AttachBrochure(ctx context.Context, id, filename string, at time.Time) error
+	StartJob(ctx context.Context, id, runID string, at time.Time) error
 }

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 
 type Step = { label: string; state: string };
 
@@ -25,6 +25,18 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
+function uploadBrochure(jobId: string, file: File): Promise<Job> {
+  const body = new FormData();
+  body.append("file", file);
+  return api<Job>("/api/jobs/" + jobId + "/file", { method: "POST", body });
+}
+
+function message(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
+
+const POLL_MS = 1000;
+
 export function App() {
   const [me, setMe] = useState<Account | null>(null);
   const [ready, setReady] = useState(false);
@@ -50,32 +62,37 @@ export function App() {
   }, [me]);
 
   if (!ready) {
-    return <p className="muted">Loading…</p>;
+    return <p className="loading">Loading…</p>;
   }
   if (!me) {
     return <Auth onIn={setMe} />;
   }
 
   return (
-    <main>
-      <header>
-        <div>
-          <p className="eyebrow">Real estate</p>
-          <h1>Listing board</h1>
+    <main className="board">
+      <header className="topbar">
+        <h1>Listing board</h1>
+        <div className="account">
+          <span>{me.email}</span>
+          <button
+            className="ghost"
+            onClick={() => {
+              api("/api/logout", { method: "POST" }).finally(() => {
+                setMe(null);
+                setSelected(null);
+                setError("");
+              });
+            }}
+          >
+            Log out
+          </button>
         </div>
-        <button
-          className="ghost"
-          onClick={() => {
-            api("/api/logout", { method: "POST" }).finally(() => {
-              setMe(null);
-              setSelected(null);
-            });
-          }}
-        >
-          Log out
-        </button>
       </header>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
       <Create
         onCreated={(job) => {
           setJobs((current) => [job, ...current]);
@@ -85,14 +102,18 @@ export function App() {
         onError={setError}
       />
       <section className="layout">
-        <ul className="list">
-          {jobs.length === 0 ? <li className="muted">No sheets yet.</li> : null}
+        <ul className="list" aria-label="Sheets">
+          {jobs.length === 0 ? <li className="empty">No sheets yet. Create one above.</li> : null}
           {jobs.map((job) => (
             <li key={job.id}>
-              <button className={selected?.id === job.id ? "row on" : "row"} onClick={() => setSelected(job)}>
-                <span>
+              <button
+                className={selected?.id === job.id ? "row on" : "row"}
+                aria-current={selected?.id === job.id ? "true" : undefined}
+                onClick={() => setSelected(job)}
+              >
+                <span className="row-text">
                   <strong>{job.title}</strong>
-                  <span className="muted">{job.address}</span>
+                  <span>{job.address}</span>
                 </span>
                 <span className={"status " + job.status}>{job.status}</span>
               </button>
@@ -109,7 +130,7 @@ export function App() {
             onError={setError}
           />
         ) : (
-          <p className="muted">Select a sheet.</p>
+          <p className="placeholder">Select a sheet to see its checklist.</p>
         )}
       </section>
     </main>
@@ -133,14 +154,16 @@ function Auth({ onIn }: { onIn: (account: Account) => void }) {
       });
       onIn(account);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not sign in");
+      setError(message(err, "Could not sign in"));
     }
   }
 
   return (
-    <main className="narrow">
-      <p className="eyebrow">Real estate</p>
+    <main className="auth">
       <h1>Listing board</h1>
+      <p className="lead">
+        {mode === "login" ? "Sign in to manage your listing sheets." : "Create an account to manage your listing sheets."}
+      </p>
       <form onSubmit={submit}>
         <label>
           Email
@@ -150,7 +173,11 @@ function Auth({ onIn }: { onIn: (account: Account) => void }) {
           Password
           <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" required />
         </label>
-        {error ? <p className="error">{error}</p> : null}
+        {error ? (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        ) : null}
         <button type="submit">{mode === "login" ? "Sign in" : "Create account"}</button>
       </form>
       <button className="ghost" onClick={() => setMode(mode === "login" ? "register" : "login")}>
@@ -165,27 +192,33 @@ function Create({ onCreated, onError }: { onCreated: (job: Job) => void; onError
   const [address, setAddress] = useState("");
   const [file, setFile] = useState<File | null>(null);
 
-  async function submit(event: FormEvent) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) {
       onError("Choose a brochure file");
       return;
     }
+    const form = event.currentTarget;
+    let job: Job;
     try {
-      const job = await api<Job>("/api/jobs", {
+      job = await api<Job>("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, address }),
       });
-      const body = new FormData();
-      body.append("file", file);
-      const saved = await api<Job>("/api/jobs/" + job.id + "/file", { method: "POST", body });
-      setTitle("");
-      setAddress("");
-      setFile(null);
-      onCreated(saved);
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not create the sheet");
+      onError(message(err, "Could not create the sheet"));
+      return;
+    }
+    form.reset();
+    setTitle("");
+    setAddress("");
+    setFile(null);
+    try {
+      onCreated(await uploadBrochure(job.id, file));
+    } catch (err) {
+      onCreated(job);
+      onError(message(err, "Could not attach the brochure"));
     }
   }
 
@@ -222,31 +255,87 @@ function Sheet({
   onChange: (job: Job) => void;
   onError: (message: string) => void;
 }) {
+  useEffect(() => {
+    if (job.status !== "running") {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      api<Job>("/api/jobs/" + job.id)
+        .then((next) => {
+          if (!cancelled) {
+            onChange(next);
+          }
+        })
+        .catch(() => {});
+    }, POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [job.id, job.status]);
+
   async function start() {
     onError("");
     try {
-      const next = await api<Job>("/api/jobs/" + job.id + "/start", { method: "POST" });
-      onChange(next);
+      onChange(await api<Job>("/api/jobs/" + job.id + "/start", { method: "POST" }));
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Could not start the sheet");
+      onError(message(err, "Could not start the sheet"));
     }
   }
 
+  async function attach(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    onError("");
+    try {
+      onChange(await uploadBrochure(job.id, file));
+    } catch (err) {
+      event.target.value = "";
+      onError(message(err, "Could not attach the brochure"));
+    }
+  }
+
+  const current = job.status === "running" ? job.checklist.findIndex((step) => step.state !== "done") : -1;
+
   return (
     <article className="sheet">
-      <h2>{job.title}</h2>
-      <p>{job.address}</p>
-      <p className={"status " + job.status}>{job.status}</p>
-      {job.filename ? <p className="muted">{job.filename}</p> : null}
-      {job.error ? <p className="error">{job.error}</p> : null}
-      <ol>
-        {job.checklist.map((step) => (
-          <li key={step.label} className={step.state}>
+      <div className="sheet-head">
+        <div>
+          <h2>{job.title}</h2>
+          <p className="address">{job.address}</p>
+        </div>
+        <span className={"status " + job.status}>{job.status}</span>
+      </div>
+      {job.filename ? (
+        <p className="file">
+          Brochure{" "}
+          <a href={"/api/jobs/" + job.id + "/file"} download>
+            {job.filename}
+          </a>
+        </p>
+      ) : null}
+      {job.error ? (
+        <p className="error" role="alert">
+          {job.error}
+        </p>
+      ) : null}
+      <ol className="steps" aria-live="polite">
+        {job.checklist.map((step, index) => (
+          <li key={step.label} className={index === current ? step.state + " current" : step.state}>
             {step.label}
           </li>
         ))}
       </ol>
-      {job.status === "draft" ? <button onClick={start}>Start</button> : null}
+      {job.status === "draft" && !job.filename ? (
+        <label>
+          Brochure
+          <input type="file" accept=".pdf,.txt,application/pdf,text/plain" onChange={attach} />
+        </label>
+      ) : null}
+      {job.status === "draft" && job.filename ? <button onClick={start}>Start</button> : null}
     </article>
   );
 }

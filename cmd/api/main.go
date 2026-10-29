@@ -23,7 +23,10 @@ func main() {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		log.Fatal(err)
 	}
-	st, err := waitStore(dsn)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	st, err := store.Connect(ctx, dsn, 30*time.Second)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -34,8 +37,6 @@ func main() {
 		Handler:           httpapi.New(st, dataDir, os.Getenv("WEB_DIR")).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
 	go func() {
 		<-ctx.Done()
 		shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -45,22 +46,6 @@ func main() {
 	log.Printf("listening on %s", srv.Addr)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
-	}
-}
-
-func waitStore(dsn string) (*store.Store, error) {
-	deadline := time.Now().Add(30 * time.Second)
-	var last error
-	for {
-		st, err := store.Open(dsn)
-		if err == nil {
-			return st, nil
-		}
-		last = err
-		if time.Now().After(deadline) {
-			return nil, last
-		}
-		time.Sleep(500 * time.Millisecond)
 	}
 }
 

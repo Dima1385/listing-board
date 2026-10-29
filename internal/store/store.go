@@ -37,15 +37,45 @@ func Open(dsn string) (*Store, error) {
 	return s, nil
 }
 
+func Connect(ctx context.Context, dsn string, timeout time.Duration) (*Store, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		st, err := Open(dsn)
+		if err == nil {
+			return st, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
 func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+const migrationLock = 7343001
+
 func (s *Store) migrate() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := s.db.ExecContext(ctx, schemaSQL)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, migrationLock); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, schemaSQL); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (board.User, error) {
@@ -133,25 +163,69 @@ func (s *Store) Job(ctx context.Context, id string) (board.Job, error) {
 	return job, mapNotFound(err)
 }
 
-func (s *Store) UpdateJob(ctx context.Context, job board.Job) error {
+func (s *Store) AttachBrochure(ctx context.Context, id, filename string, at time.Time) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE jobs SET filename = $2, updated_at = $3
+		WHERE id = $1 AND filename = ''
+	`, id, filename, at.UTC())
+	if err != nil {
+		return err
+	}
+	return conflictIfNone(res)
+}
+
+func (s *Store) StartJob(ctx context.Context, id, runID string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE jobs SET status = $2, run_id = $3, updated_at = $4
+		WHERE id = $1 AND status = $5
+	`, id, board.StatusRunning, runID, at.UTC(), board.StatusDraft)
+	if isUnique(err) {
+		return board.ErrConflict
+	}
+	return err
+}
+
+func (s *Store) RunningJobIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id FROM jobs WHERE status = $1 ORDER BY updated_at
+	`, board.StatusRunning)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *Store) UpdateRun(ctx context.Context, job board.Job) error {
 	raw, err := json.Marshal(job.Checklist)
 	if err != nil {
 		return err
 	}
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE jobs
-		SET status = $1, error = $2, run_id = $3, filename = $4, checklist = $5, updated_at = $6
-		WHERE id = $7
-	`, job.Status, job.Error, job.RunID, job.Filename, string(raw), job.UpdatedAt.UTC(), job.ID)
+		UPDATE jobs SET status = $3, error = $4, checklist = $5, updated_at = $6
+		WHERE id = $1 AND run_id = $2 AND status = $7
+	`, job.ID, job.RunID, job.Status, job.Error, string(raw), job.UpdatedAt.UTC(), board.StatusRunning)
 	if err != nil {
 		return err
 	}
+	return conflictIfNone(res)
+}
+
+func conflictIfNone(res sql.Result) error {
 	n, err := res.RowsAffected()
 	if err != nil {
 		return err
 	}
 	if n == 0 {
-		return board.ErrNotFound
+		return board.ErrConflict
 	}
 	return nil
 }
@@ -174,6 +248,8 @@ func scanJob(row scanner) (board.Job, error) {
 	if err != nil {
 		return board.Job{}, err
 	}
+	job.CreatedAt = job.CreatedAt.UTC()
+	job.UpdatedAt = job.UpdatedAt.UTC()
 	if err := json.Unmarshal([]byte(raw), &job.Checklist); err != nil {
 		return board.Job{}, err
 	}

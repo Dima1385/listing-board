@@ -24,3 +24,6 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_running_per_user
+    ON jobs (user_id) WHERE status = 'running';
