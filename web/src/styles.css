@@ -85,13 +85,64 @@ input:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-input[type="file"] {
-  padding: 7px 8px;
-  color: var(--muted);
-  font-size: 13px;
+.file-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  min-width: 0;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  cursor: pointer;
 }
 
-input[type="file"]::file-selector-button {
+.file-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.file-box input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.file-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.file-box:hover .file-button {
+  background: #eceef0;
+}
+
+.file-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button {
   margin-right: 10px;
   padding: 4px 10px;
   border: 1px solid var(--line);
@@ -148,7 +199,12 @@ button.ghost:hover {
 }
 
 .auth form button {
+  width: 100%;
   margin-top: 4px;
+}
+
+.auth > .ghost {
+  justify-self: start;
 }
 
 .lead {
@@ -197,7 +253,7 @@ button.ghost:hover {
 }
 
 .board > .error {
-  margin-top: 16px;
+  margin-bottom: 16px;
 }
 
 .layout {
@@ -357,7 +413,7 @@ button.row.on {
 
 .steps li::before {
   position: absolute;
-  top: 3px;
+  top: 2px;
   left: 0;
   width: 18px;
   height: 18px;
@@ -369,9 +425,9 @@ button.row.on {
 
 .steps li:not(:last-child)::after {
   position: absolute;
-  top: 25px;
-  bottom: 2px;
-  left: 9px;
+  top: 23px;
+  bottom: 1px;
+  left: 8px;
   width: 2px;
   background: var(--line);
   content: "";
@@ -424,7 +480,7 @@ button.row.on {
   justify-self: start;
 }
 
-@media (max-width: 800px) {
+@media (max-width: 960px) {
   .create {
     grid-template-columns: 1fr 1fr;
   }
@@ -434,6 +490,12 @@ button.row.on {
     grid-column: 1 / -1;
   }
 
+  .create button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
   .layout {
     grid-template-columns: 1fr;
   }

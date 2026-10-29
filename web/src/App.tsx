@@ -232,17 +232,30 @@ function Create({ onCreated, onError }: { onCreated: (job: Job) => void; onError
         Address
         <input value={address} onChange={(event) => setAddress(event.target.value)} required />
       </label>
-      <label>
-        Brochure
-        <input
-          type="file"
-          accept=".pdf,.txt,application/pdf,text/plain"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          required
-        />
-      </label>
+      <FileField fileName={file?.name ?? ""} onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
       <button type="submit">Create sheet</button>
     </form>
+  );
+}
+
+function FileField({
+  fileName,
+  onChange,
+}: {
+  fileName: string;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+}) {
+  return (
+    <label className="file-field">
+      Brochure
+      <span className="file-box">
+        <input type="file" accept=".pdf,.txt,application/pdf,text/plain" onChange={onChange} />
+        <span className="file-button" aria-hidden="true">
+          Choose file
+        </span>
+        <span className="file-name">{fileName || "No file chosen"}</span>
+      </span>
+    </label>
   );
 }
 
@@ -330,10 +343,7 @@ function Sheet({
         ))}
       </ol>
       {job.status === "draft" && !job.filename ? (
-        <label>
-          Brochure
-          <input type="file" accept=".pdf,.txt,application/pdf,text/plain" onChange={attach} />
-        </label>
+        <FileField fileName="" onChange={attach} />
       ) : null}
       {job.status === "draft" && job.filename ? <button onClick={start}>Start</button> : null}
     </article>
